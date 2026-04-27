@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Streamlit
+.streamlit/
+streamlit.log
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Data files (gerekirse kaldır)
+*.csv
