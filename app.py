@@ -310,10 +310,19 @@ hr {
 </style>
 """, unsafe_allow_html=True)
 
+import io
 import pandas as pd
 import plotly.express as px
 from sklearn.preprocessing import StandardScaler
-from segmentation import process_data, find_optimal_k, run_fuzzy_cmeans, get_cluster_recommendations
+from segmentation import (
+    detect_dataset_structure,
+    get_feature_columns,
+    process_data,
+    process_prm_data,
+    find_optimal_k,
+    run_fuzzy_cmeans,
+    get_cluster_recommendations,
+)
 
 # ── Plotly koyu tema şablonu ──────────────────────────────────────────────── #
 PLOTLY_TEMPLATE = dict(
@@ -327,6 +336,59 @@ PLOTLY_TEMPLATE = dict(
         legend=dict(bgcolor='rgba(22,27,34,0.8)', bordercolor='rgba(0,212,255,0.2)', borderwidth=1),
     )
 )
+
+
+def read_customer_dataset(uploaded_file):
+    uploaded_file.seek(0)
+    content = uploaded_file.getvalue().decode('utf-8-sig')
+    lines = content.splitlines()
+    skiprows = 0
+
+    if len(lines) > 1:
+        first_line = lines[0].strip()
+        second_line = lines[1]
+        has_header_delimiter = any(delimiter in second_line for delimiter in ['\t', ',', ';'])
+        if first_line.lower().startswith('v') and has_header_delimiter:
+            skiprows = 1
+
+    return pd.read_csv(io.StringIO(content), sep=None, engine='python', skiprows=skiprows)
+
+
+def get_column_index(cols, preferred_col):
+    if preferred_col in cols:
+        return cols.index(preferred_col)
+    return 0
+
+
+def get_analysis_labels(dataset_type):
+    analysis_type = 'PRM' if dataset_type == 'PRM' else 'RFM'
+    if analysis_type == 'PRM':
+        return {
+            'analysis_type': 'PRM',
+            'dimensions': {
+                'Average_Rating': 'Preference (Average Rating)',
+                'Average_Session_Duration': 'Response (Session Duration)',
+                'Average_Pages_Viewed': 'Response (Pages Viewed)',
+                'Monetary': 'Monetary',
+            },
+            'axis_order': ['Average_Rating', 'Average_Session_Duration', 'Monetary'],
+            'download_name': 'prm_segmentation_results.csv',
+        }
+
+    return {
+        'analysis_type': 'RFM',
+        'dimensions': {
+            'Recency': 'Recency',
+            'Frequency': 'Frequency',
+            'Monetary': 'Monetary',
+        },
+        'axis_order': ['Recency', 'Frequency', 'Monetary'],
+        'download_name': 'rfm_segmentation_results.csv',
+    }
+
+
+def pair_title(labels, first, second):
+    return f"{labels['dimensions'][first]} vs {labels['dimensions'][second]}"
 
 # --------------------------------------------------------------------------- #
 # Session-state başlangıç değerleri                                            #
@@ -351,29 +413,39 @@ with st.sidebar:
     st.markdown("*Yapay Zeka Destekli Segmentasyon*")
     st.divider()
     st.header("⚙️ Veri Yükleme")
-    uploaded_file = st.file_uploader("CSV Dosyanızı Yükleyin", type=['csv'])
+    uploaded_file = st.file_uploader("CSV/TXT Dosyanızı Yükleyin", type=['csv', 'txt', 'tsv'])
 
 if uploaded_file is not None:
-    uploaded_file.seek(0)
-    df = pd.read_csv(uploaded_file)
+    df = read_customer_dataset(uploaded_file)
     cols = df.columns.tolist()
+    dataset_info = detect_dataset_structure(df)
+    detected_type = dataset_info['type']
+    mapping = dataset_info['mapping']
 
     with st.expander("🔍 Veri Seti Özeti ve Önizleme", expanded=False):
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         c1.metric("Toplam Satır", f"{len(df):,}")
         c2.metric("Sütun Sayısı", len(cols))
+        c3.metric("Algılanan Yapı", detected_type)
         st.dataframe(df.head(), use_container_width=True)
 
     with st.sidebar.expander("🛠️ Gelişmiş Ayarlar", expanded=False):
-        st.markdown("**Sütun Eşleştirme**")
-        customer_id_col  = st.selectbox("Müşteri ID Sütunu", cols,
-            index=cols.index('Customer ID') if 'Customer ID' in cols else 0)
-        invoice_date_col = st.selectbox("Tarih Sütunu", cols,
-            index=cols.index('InvoiceDate') if 'InvoiceDate' in cols else 0)
-        quantity_col     = st.selectbox("Miktar Sütunu", cols,
-            index=cols.index('Quantity') if 'Quantity' in cols else 0)
-        price_col        = st.selectbox("Fiyat Sütunu", cols,
-            index=cols.index('Price') if 'Price' in cols else 0)
+        if detected_type == 'PRM':
+            st.markdown("**PRM sütunları otomatik algılandı**")
+            customer_id_col = mapping.get('customer_id_col') or 'Customer_ID'
+            invoice_date_col = mapping.get('invoice_date_col')
+            quantity_col = mapping.get('quantity_col')
+            price_col = mapping.get('price_col')
+        else:
+            st.markdown("**Sütun Eşleştirme**")
+            customer_id_col  = st.selectbox("Müşteri ID Sütunu", cols,
+                index=get_column_index(cols, mapping.get('customer_id_col')))
+            invoice_date_col = st.selectbox("Tarih Sütunu", cols,
+                index=get_column_index(cols, mapping.get('invoice_date_col')))
+            quantity_col     = st.selectbox("Miktar Sütunu", cols,
+                index=get_column_index(cols, mapping.get('quantity_col')))
+            price_col        = st.selectbox("Fiyat Sütunu", cols,
+                index=get_column_index(cols, mapping.get('price_col')))
         st.divider()
         auto_k = st.checkbox("Optimal K'yı Otomatik Bul", value=True)
         if not auto_k:
@@ -384,29 +456,36 @@ if uploaded_file is not None:
     if st.sidebar.button("🚀 Analizi Başlat", use_container_width=True, type="primary"):
         try:
             with st.status("Analiz yürütülüyor...", expanded=True) as status:
-                st.write("📦 RFM metrikleri hesaplanıyor...")
-                rfm = process_data(df, customer_id_col, invoice_date_col,
-                                   quantity_col, price_col)
+                st.write(f"📦 {detected_type} yapısı algılandı, segmentasyon metrikleri hesaplanıyor...")
+                if detected_type == 'PRM':
+                    segment_data = process_prm_data(df)
+                else:
+                    segment_data = process_data(df, customer_id_col, invoice_date_col,
+                                                quantity_col, price_col,
+                                                amount_col=mapping.get('amount_col'),
+                                                order_id_col=mapping.get('order_id_col'))
 
+                feature_cols = get_feature_columns(detected_type)
                 scaler = StandardScaler()
-                rfm_scaled = scaler.fit_transform(rfm[['Recency', 'Frequency', 'Monetary']])
-                rfm_transposed = rfm_scaled.T
+                data_scaled = scaler.fit_transform(segment_data[feature_cols])
+                data_transposed = data_scaled.T
 
                 if auto_k:
                     st.write("🔍 Optimal K değeri aranıyor...")
-                    k = find_optimal_k(rfm_transposed)
+                    k = find_optimal_k(data_transposed)
                     st.write(f"💡 Optimal küme sayısı: **K = {k}**")
                 else:
                     k = manual_k
 
                 st.write(f"⚙️ Fuzzy C-Means çalıştırılıyor (K={k})...")
-                rfm_results, centers_df, sil_score, fpc = run_fuzzy_cmeans(rfm, k)
-                recs = get_cluster_recommendations(rfm_results, centers_df)
+                rfm_results, centers_df, sil_score, fpc = run_fuzzy_cmeans(segment_data, k, feature_cols)
+                recs = get_cluster_recommendations(rfm_results, centers_df, detected_type)
 
                 st.session_state.update({
                     'results_ready': True,
                     'rfm_results':   rfm_results,
                     'centers_df':    centers_df,
+                    'feature_cols':   feature_cols,
                     'sil_score':     sil_score,
                     'fpc':           fpc,
                     'k':             k,
@@ -414,6 +493,7 @@ if uploaded_file is not None:
                     'raw_df':        df,
                     'cid_col':       customer_id_col,
                     'idate_col':     invoice_date_col,
+                    'dataset_type':   detected_type,
                 })
                 status.update(label="✅ Analiz Tamamlandı!", state="complete", expanded=False)
 
@@ -432,9 +512,15 @@ if st.session_state['results_ready']:
     raw_df      = st.session_state['raw_df']
     cid_col     = st.session_state['cid_col']
     idate_col   = st.session_state['idate_col']
+    dataset_type = st.session_state.get('dataset_type', 'RFM')
+    feature_cols = st.session_state.get('feature_cols', get_feature_columns(dataset_type))
+    labels = get_analysis_labels(dataset_type)
+    analysis_type = labels['analysis_type']
+    dimensions = labels['dimensions']
+    x_axis, y_axis, z_axis = labels['axis_order']
 
     st.markdown("---")
-    st.header("📊 Analiz Sonuçları")
+    st.header(f"📊 {analysis_type} Analiz Sonuçları")
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Toplam Müşteri",     f"{len(rfm_results):,}")
@@ -445,7 +531,7 @@ if st.session_state['results_ready']:
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "🎯 3D Segmentasyon Grafiği",
-        "📈 RFM Dağılımları",
+        f"📈 {analysis_type} Dağılımları",
         "💡 İşletme Önerileri",
         "🔎 Müşteri Sorgulama"
     ])
@@ -457,12 +543,13 @@ if st.session_state['results_ready']:
 
     # ── TAB 1 ── #
     with tab1:
-        st.subheader("Müşteri Segmentleri — 3D Dağılım")
+        st.subheader(f"Müşteri Segmentleri — {analysis_type} 3D Dağılım")
         fig_3d = px.scatter_3d(
-            plot_df, x='Recency', y='Frequency', z='Monetary',
+            plot_df, x=x_axis, y=y_axis, z=z_axis,
             color='Cluster', opacity=0.80,
             hover_data=['CustomerID'],
-            title=f"RFM Küme Dağılımı (K={k})",
+            title=f"{analysis_type} Küme Dağılımı (K={k})",
+            labels=dimensions,
             color_discrete_sequence=COLORS
         )
         fig_3d.update_layout(
@@ -478,37 +565,92 @@ if st.session_state['results_ready']:
         )
         st.plotly_chart(fig_3d, use_container_width=True)
 
+        c_heatmap, c_dist = st.columns(2)
+        with c_heatmap:
+            st.subheader(f"{analysis_type} Feature Heatmap")
+            heatmap_df = plot_df[feature_cols].corr()
+            heatmap_labels = [dimensions[col] for col in feature_cols]
+            fig_heatmap = px.imshow(
+                heatmap_df,
+                x=heatmap_labels,
+                y=heatmap_labels,
+                text_auto=".2f",
+                aspect="auto",
+                color_continuous_scale="Turbo",
+                title=f"{analysis_type} Feature Korelasyonu"
+            )
+            fig_heatmap.update_layout(
+                **PLOTLY_TEMPLATE['layout'],
+                height=430,
+                margin=dict(l=0, r=0, b=0, t=45),
+                coloraxis_colorbar=dict(title="Korelasyon")
+            )
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+
+        with c_dist:
+            st.subheader("Cluster Distribution")
+            cluster_counts = (
+                plot_df['Cluster']
+                .value_counts()
+                .sort_index()
+                .rename_axis('Cluster')
+                .reset_index(name='Müşteri Sayısı')
+            )
+            fig_cluster_dist = px.bar(
+                cluster_counts,
+                x='Cluster',
+                y='Müşteri Sayısı',
+                color='Cluster',
+                text='Müşteri Sayısı',
+                title="Cluster Müşteri Dağılımı",
+                color_discrete_sequence=COLORS
+            )
+            fig_cluster_dist.update_layout(
+                **PLOTLY_TEMPLATE['layout'],
+                height=430,
+                margin=dict(l=0, r=0, b=0, t=45),
+                showlegend=False
+            )
+            fig_cluster_dist.update_traces(textposition='outside')
+            st.plotly_chart(fig_cluster_dist, use_container_width=True)
+
         st.subheader("Küme Merkezleri (Ortalama Değerler)")
         dc = centers_df.copy()
-        for col in ['Recency', 'Frequency', 'Monetary']:
+        for col in feature_cols:
             dc[col] = dc[col].round(1)
         cc = plot_df['Cluster'].value_counts().reset_index()
         cc.columns = ['Cluster', 'Müşteri Sayısı']
         cc['Cluster'] = cc['Cluster'].astype(int)
         dc = dc.merge(cc, on='Cluster')
+        dc = dc.rename(columns=dimensions)
         st.dataframe(dc, use_container_width=True)
 
     # ── TAB 2 ── #
     with tab2:
-        st.subheader("Recency vs Frequency")
-        fig_rf = px.scatter(
-            plot_df, x='Recency', y='Frequency', color='Cluster',
+        st.subheader(pair_title(labels, x_axis, y_axis))
+        fig_primary = px.scatter(
+            plot_df, x=x_axis, y=y_axis, color='Cluster',
             hover_data=['CustomerID', 'Monetary'],
+            labels=dimensions,
             color_discrete_sequence=COLORS
         )
-        fig_rf.update_layout(**PLOTLY_TEMPLATE['layout'])
-        st.plotly_chart(fig_rf, use_container_width=True)
+        fig_primary.update_layout(**PLOTLY_TEMPLATE['layout'])
+        st.plotly_chart(fig_primary, use_container_width=True)
 
         c1, c2 = st.columns(2)
         with c1:
-            st.subheader("Frequency vs Monetary")
-            fig_fm = px.scatter(plot_df, x='Frequency', y='Monetary', color='Cluster',
+            second_x = feature_cols[2] if dataset_type == 'PRM' else 'Frequency'
+            st.subheader(pair_title(labels, second_x, 'Monetary'))
+            fig_fm = px.scatter(plot_df, x=second_x, y='Monetary', color='Cluster',
+                                labels=dimensions,
                                 color_discrete_sequence=COLORS)
             fig_fm.update_layout(**PLOTLY_TEMPLATE['layout'])
             st.plotly_chart(fig_fm, use_container_width=True)
         with c2:
-            st.subheader("Recency vs Monetary")
-            fig_rm = px.scatter(plot_df, x='Recency', y='Monetary', color='Cluster',
+            third_x = feature_cols[0]
+            st.subheader(pair_title(labels, third_x, 'Monetary'))
+            fig_rm = px.scatter(plot_df, x=third_x, y='Monetary', color='Cluster',
+                                labels=dimensions,
                                 color_discrete_sequence=COLORS)
             fig_rm.update_layout(**PLOTLY_TEMPLATE['layout'])
             st.plotly_chart(fig_rm, use_container_width=True)
@@ -530,17 +672,26 @@ if st.session_state['results_ready']:
         for cluster_id, details in recs.items():
             with st.container(border=True):
                 st.subheader(f"{details['name']} — Küme {cluster_id} ({details['count']} Müşteri)")
-                col_r, col_f, col_m = st.columns(3)
-                col_r.metric("Ort. Recency",  f"{details['avg_r']:.1f} gün")
-                col_f.metric("Ort. Frequency", f"{details['avg_f']:.1f} işlem")
-                col_m.metric("Ort. Monetary",  f"₺{details['avg_m']:,.1f}")
-                st.info(f"**💡 Aksiyon Önerisi:**\n\n{details['rec']}")
+                metric_cols = st.columns(len(feature_cols))
+                for metric_col, feature in zip(metric_cols, feature_cols):
+                    value = details['metrics'][feature]
+                    suffix = "₺" if feature == 'Monetary' else ""
+                    metric_col.metric(f"Ort. {dimensions[feature]}", f"{suffix}{value:,.1f}")
+                st.info(f"**Kısa Açıklama:**\n\n{details['description']}")
+                st.success(
+                    "**İşletme Önerileri:**\n\n" +
+                    "\n\n".join(f"• {item}" for item in details['recommendations'])
+                )
+                st.warning(
+                    "**Dikkat Edilmesi Gereken Noktalar:**\n\n" +
+                    "\n\n".join(f"• {item}" for item in details['cautions'])
+                )
 
         st.divider()
         st.download_button(
             "⬇️ Sonuçları CSV Olarak İndir",
             rfm_results.to_csv(index=False).encode('utf-8'),
-            "rfm_segmentation_results.csv",
+            labels['download_name'],
             "text/csv",
             use_container_width=True
         )
@@ -558,17 +709,29 @@ if st.session_state['results_ready']:
             cluster_info = recs[cust_cluster]
 
             st.markdown(f"### 👤 Müşteri Profili: `{selected_customer}`")
-            cc1, cc2, cc3, cc4 = st.columns(4)
-            cc1.metric("Segment",   cluster_info['name'])
-            cc2.metric("Recency",   f"{cust_row['Recency']:.0f} gün önce")
-            cc3.metric("Frequency", f"{cust_row['Frequency']:.0f} işlem")
-            cc4.metric("Monetary",  f"₺{cust_row['Monetary']:,.0f}")
+            profile_cols = st.columns(len(feature_cols) + 1)
+            cc1 = profile_cols[0]
+            cc1.metric("Segment", cluster_info['name'])
+            for metric_col, feature in zip(profile_cols[1:], feature_cols):
+                value = cust_row[feature]
+                suffix = "₺" if feature == 'Monetary' else ""
+                metric_col.metric(dimensions[feature], f"{suffix}{value:,.0f}")
             st.divider()
-            st.success(f"**💡 Stratejik Aksiyon Planı:**\n\n{cluster_info['rec']}")
+            st.info(f"**Kısa Açıklama:**\n\n{cluster_info['description']}")
+            st.success(
+                "**Stratejik Aksiyon Planı:**\n\n" +
+                "\n\n".join(f"• {item}" for item in cluster_info['recommendations'])
+            )
+            st.warning(
+                "**Dikkat Edilmesi Gereken Noktalar:**\n\n" +
+                "\n\n".join(f"• {item}" for item in cluster_info['cautions'])
+            )
 
-            st.subheader("Son 10 İşlem")
+            st.subheader("Son 10 Kayıt")
             hist = raw_df[raw_df[cid_col].astype(str) == selected_customer]
-            hist = hist.sort_values(by=idate_col, ascending=False).head(10)
+            if idate_col in raw_df.columns:
+                hist = hist.sort_values(by=idate_col, ascending=False)
+            hist = hist.head(10)
             st.dataframe(hist, use_container_width=True)
 
 else:
