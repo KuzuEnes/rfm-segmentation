@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import silhouette_score
 
 
@@ -74,21 +74,82 @@ RFM_COLUMN_ALIASES = {
     'order_id_col': ['InvoiceNo', 'Invoice ID', 'Order_ID', 'Order ID', 'order_id'],
 }
 
-PRM_REQUIRED_COLUMNS = {
-    'Customer_ID',
-    'Product_Category',
-    'Customer_Rating',
-    'Session_Duration_Minutes',
-    'Pages_Viewed',
-    'Total_Amount',
+PRM_COLUMN_ALIASES = {
+    'customer_id_col': ['Customer_ID', 'Customer ID', 'CustomerID', 'customer_id'],
+    'session_col': ['Session_Duration_Minutes', 'Session Duration', 'SessionDuration', 'Oturum_Suresi'],
+    'pages_col': ['Pages_Viewed', 'Pages Viewed', 'PagesViewed', 'Gezilen_Sayfa'],
+    'rating_col': ['Customer_Rating', 'Customer Rating', 'Rating', 'Puan'],
+    'category_col': ['Product_Category', 'Category', 'Preferred_Category', 'Kategori'],
+    'amount_col': ['Total_Amount', 'Total Amount', 'Amount', 'Monetary', 'Harcama'],
 }
 
 RFM_FEATURE_COLUMNS = ['Recency', 'Frequency', 'Monetary']
-PRM_FEATURE_COLUMNS = [
-    'Average_Rating',
-    'Average_Session_Duration',
-    'Average_Pages_Viewed',
-    'Monetary',
+PRM_FEATURE_COLUMNS = ['preference_score', 'engagement_score', 'monetary_score']
+
+RFM_SEGMENT_DEFINITIONS = [
+    (0.0, 1.5, "Geri kazanım (reaktivasyon)", [
+        "Son alışverişten uzaklaşan müşteriye düşük bariyerli geri dönüş teklifi gönder.",
+        "Önceki alışveriş kategorisine göre hatırlatma ve yeniden aktivasyon mesajı hazırla.",
+        "Kampanya maliyetini sınırlı tut; dönüş sinyaline göre ikinci temas planla.",
+        "İletişim sıklığını düşük tutarak pasif müşteriyi yormadan yeniden dene.",
+    ]),
+    (1.5, 2.5, "İndirim teklifleri", [
+        "Fiyat hassasiyetini tetikleyecek süreli indirim veya kupon sun.",
+        "Sepete dönüş ve ikinci alışveriş kampanyalarını öne çıkar.",
+        "Düşük marjlı genel indirim yerine kategori bazlı kontrollü teklif kullan.",
+        "Teklif performansını dönüşüm ve kampanya maliyetiyle birlikte izle.",
+    ]),
+    (2.5, 3.5, "Çapraz satış önerileri", [
+        "Satın alma geçmişine tamamlayıcı ürün ve paket önerileri ekle.",
+        "Ortalama sepet tutarını artıracak birlikte al senaryoları tasarla.",
+        "Önerileri müşterinin son kategori ilgisiyle uyumlu hale getir.",
+        "Dönüşüm sağlamayan ürünleri otomatik olarak daha düşük önceliğe al.",
+    ]),
+    (3.5, 4.5, "Kişiselleştirilmiş öneriler", [
+        "Geçmiş davranışa göre kişiye özel ürün, kategori ve zamanlama önerisi üret.",
+        "Sadakat programı, erken erişim ve özel kampanya iletişimi kullan.",
+        "Önerileri e-posta, uygulama içi alan ve web vitrini boyunca tutarlı göster.",
+        "Müşteri değerini korumak için gereksiz indirim yerine alaka düzeyini artır.",
+    ]),
+    (4.5, 5.0, "VIP / premium teklifler", [
+        "Premium ürünler, özel koleksiyonlar ve yüksek değerli paketler öner.",
+        "VIP sadakat avantajları, öncelikli destek veya erken erişim sun.",
+        "Yüksek değerli müşterilerde deneyim kalitesini ve memnuniyeti yakından izle.",
+        "Marjı koruyan ayrıcalıklar kullan; indirimi ana strateji yapma.",
+    ]),
+]
+
+PRM_SEGMENT_DEFINITIONS = [
+    (0.0, 1.5, "Pasif kullanıcı yeniden kazanım", [
+        "Kısa ve net yeniden etkileşim mesajlarıyla kullanıcıyı geri çağır.",
+        "İlk tıklamayı kolaylaştıracak popüler kategori veya son görüntülenen içerik öner.",
+        "Düşük etkileşimli kullanıcıya yoğun kişiselleştirme yerine basit akış sun.",
+        "Geri dönüş olmazsa iletişim sıklığını azaltıp farklı içerik başlığı test et.",
+    ]),
+    (1.5, 2.5, "Düşük etkileşim kullanıcıları", [
+        "Kullanıcının ilgisini ölçmek için kısa, anlaşılır ve düşük eforlu içerikler göster.",
+        "Düşük riskli indirim, kupon veya ücretsiz kargo gibi kampanya tetikleyicileri dene.",
+        "Sayfa gezinmesini artıracak kategori kartları ve başlangıç önerileri sun.",
+        "Etkileşim alanlarını sadeleştir; gereksiz adımları azalt.",
+    ]),
+    (2.5, 3.5, "Keşif ve kategori odaklı kullanıcılar", [
+        "Benzer kullanıcı davranışlarından türetilmiş kategori ve ürün önerileri göster.",
+        "Gezilen sayfalara göre devam içerikleri ve tamamlayıcı keşif akışları oluştur.",
+        "Kararsız kullanıcı için karşılaştırma, yorum ve öne çıkan faydaları görünür yap.",
+        "İlgi sinyali güçlenen kategorileri sonraki oturumda daha üst sıraya taşı.",
+    ]),
+    (3.5, 4.5, "Kişiselleştirilmiş yüksek potansiyelli kullanıcılar", [
+        "Oturum ve sayfa davranışına göre dinamik kişiselleştirilmiş akış sun.",
+        "İlgi duyulan kategorilerde daha derin içerik, ürün ve kampanya önerileri üret.",
+        "Kullanıcının etkileşim ritmine uygun bildirim veya e-posta zamanlaması seç.",
+        "Yüksek etkileşimi satın alma veya üyelik hedeflerine bağlayacak net çağrılar ekle.",
+    ]),
+    (4.5, 5.0, "VIP ve premium kullanıcılar", [
+        "Yüksek ilgiyi beslemek için premium ürün, yeni kategori ve trend içerikler öner.",
+        "VIP kampanya, erken erişim veya özel koleksiyon akışları sun.",
+        "Özel koleksiyon, erken erişim veya gelişmiş filtrelerle deneyimi zenginleştir.",
+        "Premium önerilerin tekrar ziyaret, sepet değeri ve dönüşüm etkisini ayrı ölç.",
+    ]),
 ]
 
 
@@ -111,15 +172,19 @@ def detect_dataset_structure(df):
     eşleştirmeleri belirler.
     """
     cols = df.columns.tolist()
-    normalized_cols = {_normalize_col_name(col) for col in cols}
-    prm_score = sum(_normalize_col_name(col) in normalized_cols for col in PRM_REQUIRED_COLUMNS)
+    prm_mapping = {
+        key: _find_column(cols, aliases)
+        for key, aliases in PRM_COLUMN_ALIASES.items()
+    }
+    prm_required_keys = ['customer_id_col', 'category_col', 'session_col', 'pages_col', 'rating_col', 'amount_col']
+    prm_score = sum(bool(prm_mapping[key]) for key in prm_required_keys)
 
     mapping = {
         key: _find_column(cols, aliases)
         for key, aliases in RFM_COLUMN_ALIASES.items()
     }
 
-    has_prm_core = prm_score == len(PRM_REQUIRED_COLUMNS)
+    has_prm_core = prm_score == len(prm_required_keys)
     has_rfm_core = all(mapping[key] for key in [
         'customer_id_col',
         'invoice_date_col',
@@ -133,6 +198,7 @@ def detect_dataset_structure(df):
     return {
         'type': dataset_type,
         'mapping': mapping,
+        'prm_mapping': prm_mapping,
         'prm_score': prm_score,
     }
 
@@ -174,47 +240,147 @@ def process_data(df, customer_id_col='Customer ID', invoice_date_col='InvoiceDat
     return rfm
 
 
-def process_prm_data(df):
+def process_prm_data(df, mapping=None):
     """
     PRM feature engineering:
-    Preference: Preferred_Category, Average_Rating
-    Response: Average_Session_Duration, Average_Pages_Viewed
-    Monetary: Monetary
+    P: 0.5 * entropy + 0.3 * diversity + 0.2 * (1 - dominant ratio)
+    R: 0.7 * interaction_depth + 0.3 * avg_rating
+    M: log(1 + Total_Amount)
     """
     work_df = df.copy()
-    required = list(PRM_REQUIRED_COLUMNS)
-    missing = [col for col in required if col not in work_df.columns]
-    if missing:
-        raise ValueError(f"PRM analizi için eksik sütunlar: {', '.join(missing)}")
+    if mapping is None:
+        mapping = detect_dataset_structure(work_df)['prm_mapping']
 
-    for col in ['Customer_Rating', 'Session_Duration_Minutes', 'Pages_Viewed', 'Total_Amount']:
+    required_keys = ['customer_id_col', 'category_col', 'session_col', 'pages_col', 'rating_col', 'amount_col']
+    missing = [key for key in required_keys if not mapping.get(key)]
+    if missing:
+        readable = {
+            'customer_id_col': 'Müşteri_ID',
+            'category_col': 'Product_Category',
+            'session_col': 'Session Duration',
+            'pages_col': 'Pages Viewed',
+            'rating_col': 'Customer Rating',
+            'amount_col': 'Total Amount',
+        }
+        raise ValueError(
+            "PRM analizi için eksik sütunlar: " +
+            ', '.join(readable[key] for key in missing)
+        )
+
+    customer_col = mapping['customer_id_col']
+    category_col = mapping['category_col']
+    session_col = mapping['session_col']
+    pages_col = mapping['pages_col']
+    rating_col = mapping['rating_col']
+    amount_col = mapping['amount_col']
+
+    numeric_cols = [session_col, pages_col, rating_col, amount_col]
+    for col in numeric_cols:
         work_df[col] = pd.to_numeric(work_df[col], errors='coerce')
 
-    work_df = work_df.dropna(subset=[
-        'Customer_ID',
-        'Product_Category',
-        'Customer_Rating',
-        'Session_Duration_Minutes',
-        'Pages_Viewed',
-        'Total_Amount',
-    ])
+    subset = [customer_col, category_col, session_col, pages_col, rating_col, amount_col]
+    work_df = work_df.dropna(subset=subset)
 
-    prm = work_df.groupby('Customer_ID').agg({
-        'Product_Category': lambda x: x.mode().iloc[0],
-        'Customer_Rating': 'mean',
-        'Session_Duration_Minutes': 'mean',
-        'Pages_Viewed': 'mean',
-        'Total_Amount': 'sum',
+    work_df['Interaction_Depth'] = work_df[pages_col] / work_df[session_col].replace(0, np.nan)
+    work_df['Interaction_Depth'] = work_df['Interaction_Depth'].replace([np.inf, -np.inf], np.nan)
+    work_df['Interaction_Depth'] = work_df['Interaction_Depth'].fillna(0)
+    work_df['Monetary_Source'] = work_df[amount_col]
+
+    category_counts = (
+        work_df
+        .groupby([customer_col, category_col])
+        .size()
+        .rename('Category_Count')
+        .reset_index()
+    )
+    category_summary = category_counts.groupby(customer_col).agg(
+        Category_Diversity=(category_col, 'nunique'),
+        Dominant_Category_Count=('Category_Count', 'max'),
+        Total_Category_Interactions=('Category_Count', 'sum'),
+    ).reset_index()
+    category_counts = category_counts.merge(
+        category_summary[[customer_col, 'Total_Category_Interactions']],
+        on=customer_col,
+        how='left'
+    )
+    category_counts['Category_Probability'] = (
+        category_counts['Category_Count'] /
+        category_counts['Total_Category_Interactions']
+    )
+    entropy_summary = category_counts.assign(
+        Entropy_Component=lambda x: -x['Category_Probability'] * np.log(x['Category_Probability'])
+    ).groupby(customer_col)['Entropy_Component'].sum().reset_index(name='Category_Entropy')
+    category_summary = category_summary.merge(entropy_summary, on=customer_col, how='left')
+    category_summary['Dominant_Category_Ratio'] = (
+        category_summary['Dominant_Category_Count'] /
+        category_summary['Total_Category_Interactions']
+    )
+    category_summary = category_summary.rename(columns={customer_col: 'CustomerID'})
+
+    prm = work_df.groupby(customer_col).agg({
+        category_col: lambda x: x.mode().iloc[0] if not x.mode().empty else x.iloc[0],
+        session_col: 'mean',
+        pages_col: 'mean',
+        rating_col: 'mean',
+        'Interaction_Depth': 'mean',
+        'Monetary_Source': 'sum',
     }).reset_index()
 
     prm.columns = [
         'CustomerID',
         'Preferred_Category',
-        'Average_Rating',
-        'Average_Session_Duration',
-        'Average_Pages_Viewed',
-        'Monetary',
+        'Avg_Session',
+        'Avg_Pages',
+        'Avg_Rating',
+        'interaction_depth',
+        'Monetary_Raw',
     ]
+    prm = prm.merge(category_summary, on='CustomerID', how='left')
+    prm['Inverse_Dominant_Ratio'] = 1 - prm['Dominant_Category_Ratio']
+
+    scaler = MinMaxScaler()
+    prm[[
+        'Category_Entropy_Norm',
+        'Category_Diversity_Norm',
+        'Inverse_Dominant_Ratio_Norm',
+        'Interaction_Depth_Norm',
+        'Rating_Norm',
+    ]] = scaler.fit_transform(prm[[
+        'Category_Entropy',
+        'Category_Diversity',
+        'Inverse_Dominant_Ratio',
+        'interaction_depth',
+        'Avg_Rating',
+    ]])
+
+    prm['preference_raw'] = (
+        0.5 * prm['Category_Entropy_Norm'] +
+        0.3 * prm['Category_Diversity_Norm'] +
+        0.2 * prm['Inverse_Dominant_Ratio_Norm']
+    )
+    prm['engagement_score'] = (
+        0.7 * prm['Interaction_Depth_Norm'] +
+        0.3 * prm['Rating_Norm']
+    )
+    prm['monetary_log'] = np.log1p(prm['Monetary_Raw'])
+    prm[['preference_score', 'monetary_score']] = scaler.fit_transform(prm[[
+        'preference_raw',
+        'monetary_log',
+    ]])
+
+    prm = prm[[
+        'CustomerID',
+        'Preferred_Category',
+        'Category_Diversity',
+        'Dominant_Category_Ratio',
+        'Category_Entropy',
+        'interaction_depth',
+        'preference_score',
+        'engagement_score',
+        'monetary_score',
+        'Monetary_Raw',
+        'monetary_log',
+    ]]
 
     return prm
 
@@ -241,35 +407,29 @@ def _make_cluster_names_unique(recommendations):
         details['name'] = f"{name} - {suffix}"
 
 
-def find_optimal_k(data_transposed, k_min=2, k_max=8):
+def find_optimal_k(data_transposed, k_min=2, k_max=6):
     """
-    Fuzzy C-Means için optimal K sayısını bulur (hibrit FPC + PE + XB skoru).
+    Fuzzy C-Means için optimal K sayısını FPC + silhouette skoruna göre bulur.
     """
+    n_samples = data_transposed.shape[1]
+    k_max = min(k_max, n_samples)
+    if n_samples < k_min:
+        raise ValueError("Kümeleme için en az 2 müşteri kaydı gereklidir.")
+
+    data_scaled = data_transposed.T
     best_k = 3
     best_hybrid_score = -1
 
     for k in range(k_min, k_max + 1):
         cntr, u, d, fpc = _fuzzy_cmeans(data_transposed, c=k, m=2, error=0.005, maxiter=500)
-
-        # Partition Entropy (PE)
-        u_log = np.where(u > 0, u * np.log(u), 0)
-        pe = -np.sum(u_log) / u.shape[1]
-
-        # Xie-Beni Index (XB)
-        n_samples = u.shape[1]
-        compactness = np.sum((u ** 2) * (d ** 2))
-        min_center_dist = np.inf
-        for i in range(k):
-            for j in range(i + 1, k):
-                dist_ij = np.sum((cntr[i] - cntr[j]) ** 2)
-                if dist_ij < min_center_dist:
-                    min_center_dist = dist_ij
-        xb = compactness / (n_samples * min_center_dist) if min_center_dist > 0 else np.inf
-
-        # Hibrit skor
-        pe_norm = max(0, min(1, 1 - pe / 2))
-        xb_norm = max(0, min(1, 1 - xb / 2))
-        hybrid_score = (fpc + pe_norm + xb_norm) / 3
+        labels = np.argmax(u, axis=0)
+        unique_labels = np.unique(labels)
+        if 1 < len(unique_labels) < n_samples:
+            sil = silhouette_score(data_scaled, labels)
+        else:
+            sil = -1.0
+        silhouette_norm = (sil + 1) / 2
+        hybrid_score = (fpc + silhouette_norm) / 2
 
         if hybrid_score > best_hybrid_score:
             best_hybrid_score = hybrid_score
@@ -278,12 +438,266 @@ def find_optimal_k(data_transposed, k_min=2, k_max=8):
     return best_k
 
 
-def run_fuzzy_cmeans(data, n_clusters, feature_cols=None):
+def _cluster_desirability_values(centers_df, dataset_type, feature_cols):
+    available_cols = [col for col in feature_cols if col in centers_df.columns]
+    if not available_cols:
+        return pd.Series(np.zeros(len(centers_df)), index=centers_df.index)
+
+    center_values = centers_df[available_cols].astype(float)
+    std = center_values.std(ddof=0).replace(0, 1)
+    normalized = (center_values - center_values.mean()) / std
+
+    if dataset_type == 'RFM' and 'Recency' in normalized.columns:
+        normalized['Recency'] = -normalized['Recency']
+
+    return normalized.mean(axis=1)
+
+
+def _cluster_scores_from_centers(centers_df, dataset_type, feature_cols):
+    desirability = _cluster_desirability_values(centers_df, dataset_type, feature_cols)
+    score_df = centers_df[['Cluster']].copy()
+    score_df['Centroid_Value'] = desirability.astype(float)
+    score_df['Centroid_Rank'] = score_df['Centroid_Value'].rank(
+        method='first',
+        ascending=True
+    ).astype(int)
+    k = len(score_df)
+    score_df['Cluster_Score'] = (score_df['Centroid_Rank'] / k) * 5
+    return score_df
+
+
+def _get_segment_definition(score, dataset_type):
+    definitions = PRM_SEGMENT_DEFINITIONS if dataset_type == 'PRM' else RFM_SEGMENT_DEFINITIONS
+    bounded_score = min(max(float(score), 0.0), 5.0)
+    for lower, upper, label, items in definitions:
+        if lower <= bounded_score < upper or (bounded_score == 5.0 and upper == 5.0):
+            return label, items
+    return definitions[-1][2], definitions[-1][3]
+
+
+def _level(value, low, high, invert=False):
+    if invert:
+        if value <= low:
+            return 'high'
+        if value >= high:
+            return 'low'
+        return 'mid'
+    if value >= high:
+        return 'high'
+    if value <= low:
+        return 'low'
+    return 'mid'
+
+
+def _quantile_thresholds(centers_df, feature):
+    if feature not in centers_df.columns:
+        return 0.0, 0.0
+    return (
+        float(centers_df[feature].quantile(0.33)),
+        float(centers_df[feature].quantile(0.67)),
+    )
+
+
+def _semantic_strategy(segment_name):
+    strategies = {
+        'Yeni müşteri': (
+            'İlk Deneyimi Güçlendirme Stratejisi',
+            [
+                'Hoş geldin kampanyası ve ikinci alışveriş teşviki sun.',
+                'Marka güvenini artıran popüler ürün ve yorum içeriklerini göster.',
+                'İlk alışveriş kategorisine göre düşük bariyerli öneriler hazırla.',
+                'Yeni müşterinin tekrar ziyaret zamanlamasını e-posta veya bildirimle destekle.',
+            ],
+        ),
+        'Sadık müşteri': (
+            'Sadakat ve Tekrar Satın Alma Stratejisi',
+            [
+                'Sadakat puanı, özel kupon veya erken erişim avantajları sun.',
+                'Geçmiş alışveriş kategorilerine göre kişiselleştirilmiş ürün öner.',
+                'Tekrar satın alma döngüsüne uygun hatırlatma kampanyaları planla.',
+                'Memnuniyet ve sepet değeri trendini düzenli izle.',
+            ],
+        ),
+        'Pasif müşteri': (
+            'Yeniden Kazanım ve Aktivasyon Stratejisi',
+            [
+                'Zaman sınırlı geri dönüş kampanyası uygula.',
+                'Önceden ilgilenilen kategorileri ve düşük fiyatlı ürünleri tekrar öner.',
+                'Push notification ve e-posta ile düşük frekanslı hatırlatma gönder.',
+                'Dönüş olmazsa iletişim sıklığını azaltıp farklı teklif test et.',
+            ],
+        ),
+        'VIP müşteri': (
+            'Premium Sadakat ve Özel Teklif Stratejisi',
+            [
+                'Premium ürün ve yüksek değerli bundle önerileri sun.',
+                'Erken erişim, özel koleksiyon veya VIP avantajları göster.',
+                'Düşük oranlı kişisel indirimlerle marjı koruyarak değer yarat.',
+                'Yüksek değerli müşterilerde deneyim kalitesini yakından izle.',
+            ],
+        ),
+        'Fırsat odaklı müşteri': (
+            'Kontrollü Kampanya ve Sepet Artırma Stratejisi',
+            [
+                'Süreli indirim ve kuponları kategori bazlı sınırlandır.',
+                'Düşük tutarlı alışverişleri tamamlayıcı ürünlerle büyüt.',
+                'Kampanya maliyeti ve dönüşüm oranını birlikte takip et.',
+                'İndirim bağımlılığını azaltmak için değer odaklı paketler sun.',
+            ],
+        ),
+        'Explorer kullanıcı': (
+            'Kategori Keşfi ve Cross-Sell Stratejisi',
+            [
+                'Yeni kategori ürünlerini öne çıkar.',
+                'Trend ürün önerileri ve keşif rafları sun.',
+                'Çapraz kategori kampanyaları göster.',
+                'Keşif odaklı kişiselleştirilmiş içerikler öner.',
+            ],
+        ),
+        'Active Browser': (
+            'Etkileşimi Dönüşüme Çevirme Stratejisi',
+            [
+                'Gezilen ürünleri karşılaştırma ve yorum içerikleriyle destekle.',
+                'Oturum içi davranışa göre anlık kategori önerileri göster.',
+                'Düşük tutarlı teşviklerle ilk dönüşümü kolaylaştır.',
+                'Kararsızlığı azaltacak stok, teslimat ve avantaj bilgilerini görünür yap.',
+            ],
+        ),
+        'VIP kullanıcı': (
+            'Premium Sadakat ve Özel Teklif Stratejisi',
+            [
+                'Premium ürün önerileri sun.',
+                'Erken erişim kampanyaları göster.',
+                'Düşük oranlı özel VIP indirimleri uygula.',
+                'Kişiselleştirilmiş premium bundle önerileri üret.',
+            ],
+        ),
+        'Passive kullanıcı': (
+            'Yeniden Kazanım ve Aktivasyon Stratejisi',
+            [
+                'Zaman sınırlı indirim kampanyaları uygula.',
+                'Düşük fiyatlı ürün önerileri sun.',
+                'Push notification ve e-posta kampanyaları gönder.',
+                'Önceden ilgilenilen kategorileri tekrar öner.',
+            ],
+        ),
+        'Engaged kullanıcı': (
+            'Etkileşim Derinleştirme Stratejisi',
+            [
+                'İlgili kategorilerde daha derin içerik ve ürün önerileri sun.',
+                'Davranış ritmine uygun bildirim ve kampanya zamanlaması seç.',
+                'Orta değerli kullanıcıyı sepet büyütmeye yönlendiren paketler göster.',
+                'Etkileşim sinyalini satın alma hedeflerine bağlayan net çağrılar kullan.',
+            ],
+        ),
+        'Selective Premium kullanıcı': (
+            'Seçici Premium Dönüşüm Stratejisi',
+            [
+                'Az ama yüksek değerli tercihlere uygun premium ürünler öner.',
+                'Kategori odağını bozmadan özel koleksiyon ve bundle sun.',
+                'Genel kampanya yerine kişisel ve sınırlı avantajlar kullan.',
+                'Yüksek harcama eğilimini deneyim kalitesiyle destekle.',
+            ],
+        ),
+    }
+    return strategies[segment_name]
+
+
+def _semantic_segment_from_centroid(row, centers_df, dataset_type):
+    if dataset_type == 'PRM':
+        p_low, p_high = _quantile_thresholds(centers_df, 'preference_score')
+        r_low, r_high = _quantile_thresholds(centers_df, 'engagement_score')
+        m_low, m_high = _quantile_thresholds(centers_df, 'monetary_score')
+        p = _level(float(row['preference_score']), p_low, p_high)
+        r = _level(float(row['engagement_score']), r_low, r_high)
+        m = _level(float(row['monetary_score']), m_low, m_high)
+
+        if p == 'high' and r == 'high' and m == 'high':
+            return 'VIP kullanıcı'
+        if p == 'low' and r == 'low' and m == 'low':
+            return 'Passive kullanıcı'
+        if p == 'low' and m == 'high':
+            return 'Selective Premium kullanıcı'
+        if p == 'high' and m in ['low', 'mid']:
+            return 'Explorer kullanıcı'
+        if r == 'high' and m == 'low':
+            return 'Active Browser'
+        if r == 'high' and m == 'mid':
+            return 'Engaged kullanıcı'
+        if m == 'high':
+            return 'VIP kullanıcı'
+        if r == 'high':
+            return 'Active Browser'
+        if p == 'high':
+            return 'Explorer kullanıcı'
+        return 'Passive kullanıcı'
+
+    r_low, r_high = _quantile_thresholds(centers_df, 'Recency')
+    f_low, f_high = _quantile_thresholds(centers_df, 'Frequency')
+    m_low, m_high = _quantile_thresholds(centers_df, 'Monetary')
+    recency = _level(float(row['Recency']), r_low, r_high, invert=True)
+    frequency = _level(float(row['Frequency']), f_low, f_high)
+    monetary = _level(float(row['Monetary']), m_low, m_high)
+
+    if monetary == 'high' and frequency == 'high':
+        return 'VIP müşteri'
+    if recency == 'high' and frequency == 'high' and monetary == 'high':
+        return 'Sadık müşteri'
+    if recency == 'low' and frequency == 'low' and monetary == 'low':
+        return 'Yeni müşteri'
+    if recency == 'high' and frequency == 'low' and monetary == 'low':
+        return 'Pasif müşteri'
+    if frequency == 'high' and monetary == 'low':
+        return 'Fırsat odaklı müşteri'
+    if recency == 'high':
+        return 'Sadık müşteri'
+    if monetary == 'high':
+        return 'VIP müşteri'
+    return 'Pasif müşteri'
+
+
+def apply_fuzzy_scores(results, centers_df, membership_matrix, dataset_type, feature_cols):
+    cluster_score_df = _cluster_scores_from_centers(centers_df, dataset_type, feature_cols)
+    cluster_scores = (
+        cluster_score_df
+        .sort_values('Cluster')['Cluster_Score']
+        .to_numpy(dtype=float)
+    )
+
+    weighted_scores = membership_matrix.T @ cluster_scores
+    score_col = 'PRM_Score' if dataset_type == 'PRM' else 'RFM_Score'
+
+    scored_results = results.copy()
+    scored_results[score_col] = weighted_scores
+    scored_results['Final_Score'] = weighted_scores
+    scored_results['FinalScore'] = weighted_scores
+
+    labels = []
+    recommendation_titles = []
+    recommendation_lists = []
+    for score in weighted_scores:
+        label, items = _get_segment_definition(score, dataset_type)
+        labels.append(label)
+        recommendation_titles.append(label)
+        recommendation_lists.append(' | '.join(items))
+
+    scored_results['Segment_Label'] = labels
+    scored_results['Recommendation_Title'] = recommendation_titles
+    scored_results['Recommendation_List'] = recommendation_lists
+
+    return scored_results, cluster_score_df
+
+
+def run_fuzzy_cmeans(data, n_clusters, feature_cols=None, dataset_type='RFM'):
     """
     Belirli bir K değeri için Fuzzy C-Means çalıştırır ve sonuçları döner.
     """
     if feature_cols is None:
-        feature_cols = RFM_FEATURE_COLUMNS
+        feature_cols = get_feature_columns(dataset_type)
+    max_clusters = min(6, len(data))
+    if max_clusters < 2:
+        raise ValueError("Kümeleme için en az 2 müşteri kaydı gereklidir.")
+    n_clusters = int(min(max(n_clusters, 2), max_clusters))
 
     scaler = StandardScaler()
     data_scaled = scaler.fit_transform(data[feature_cols])
@@ -302,6 +716,9 @@ def run_fuzzy_cmeans(data, n_clusters, feature_cols=None):
     cluster_centers = scaler.inverse_transform(cntr)
     centers_df = pd.DataFrame(cluster_centers, columns=feature_cols)
     centers_df['Cluster'] = range(n_clusters)
+    results, cluster_score_df = apply_fuzzy_scores(results, centers_df, u, dataset_type, feature_cols)
+    centers_df = centers_df.merge(cluster_score_df, on='Cluster', how='left')
+    centers_df = centers_df.sort_values('Centroid_Rank').reset_index(drop=True)
 
     try:
         silhouette_avg = silhouette_score(data_scaled, cluster_labels)
@@ -313,242 +730,56 @@ def run_fuzzy_cmeans(data, n_clusters, feature_cols=None):
 
 def get_cluster_recommendations(results_with_clusters, centers_df, dataset_type='RFM'):
     """
-    Kümelerin özelliklerine göre iş önerileri üretir.
+    Cluster centroid değerlerini semantik olarak yorumlayıp segment adı ve strateji üretir.
     """
     recommendations = {}
-    monetary_median = centers_df['Monetary'].median()
-    rating_median = centers_df['Average_Rating'].median() if 'Average_Rating' in centers_df.columns else None
-    session_median = centers_df['Average_Session_Duration'].median() if 'Average_Session_Duration' in centers_df.columns else None
-    pages_median = centers_df['Average_Pages_Viewed'].median() if 'Average_Pages_Viewed' in centers_df.columns else None
+    feature_cols = get_feature_columns(dataset_type)
+    score_col = 'PRM_Score' if dataset_type == 'PRM' else 'RFM_Score'
 
-    for idx, row in centers_df.iterrows():
+    for _, row in centers_df.iterrows():
         cluster_id = int(row['Cluster'])
-        count = len(results_with_clusters[results_with_clusters['Cluster'].astype(int) == cluster_id])
+        cluster_rows = results_with_clusters[
+            results_with_clusters['Cluster'].astype(int) == cluster_id
+        ]
+        count = len(cluster_rows)
+        cluster_score = float(row['Cluster_Score']) if 'Cluster_Score' in row.index else 0.0
+        segment_name = _semantic_segment_from_centroid(row, centers_df, dataset_type)
+        strategy_title, recs = _semantic_strategy(segment_name)
 
-        if dataset_type == 'PRM':
-            rating = row['Average_Rating']
-            session = row['Average_Session_Duration']
-            pages = row['Average_Pages_Viewed']
-            monetary = row['Monetary']
-
-            high_rating = rating >= rating_median
-            high_engagement = session >= session_median or pages >= pages_median
-            high_monetary = monetary >= monetary_median
-            page_dominant = pages >= pages_median and session < session_median
-            session_dominant = session >= session_median and pages < pages_median
-
-            if high_rating and high_engagement and high_monetary:
-                name = "🌟 Bağlı ve Yüksek Değerli Müşteriler"
-                description = "Memnuniyet, etkileşim ve harcama seviyesi birlikte yüksek olan en güçlü PRM grubudur."
-                recs = [
-                    "Kişiselleştirilmiş ürün önerileri sunulmalı",
-                    "Favori kategori bazlı kampanyalar hazırlanmalı",
-                    "Premium sadakat teklifleri uygulanmalı",
-                ]
-                cautions = [
-                    "Aşırı kampanya sıklığı memnun müşterilerde yorgunluk yaratabilir",
-                    "Öneriler müşterinin tercih ettiği kategoriyle uyumlu tutulmalı",
-                ]
-            elif high_rating and high_engagement and not high_monetary:
-                name = "🎯 Etkileşimli Potansiyel Müşteriler"
-                description = "Memnun ve aktif gezinen, fakat parasal değeri henüz yüksek seviyeye çıkmamış müşterilerdir."
-                recs = [
-                    "Cross-sell ve up-sell teklifleri gösterilmeli",
-                    "Sepet tutarını artıracak paket önerileri sunulmalı",
-                    "Memnun oldukları kategorilerde tamamlayıcı ürünler öne çıkarılmalı",
-                ]
-                cautions = [
-                    "Fiyat hassasiyeti yüksek olabilir; agresif premium tekliflerden kaçınılmalı",
-                    "Dönüşüm oranı düzenli izlenmeli",
-                ]
-            elif high_rating and not high_engagement and high_monetary:
-                name = "💎 Memnun ve Hızlı Alışverişçiler"
-                description = "Memnuniyet ve harcama seviyesi yüksek, ancak gezinme/oturum davranışı daha kısa olan müşterilerdir."
-                recs = [
-                    "Satın alma yolunu kısaltan hızlı tekrar alışveriş seçenekleri sunulmalı",
-                    "Önceki tercihleri temel alan doğrudan ürün önerileri gösterilmeli",
-                    "Favori kategori hatırlatmaları kullanılmalı",
-                ]
-                cautions = [
-                    "Bu müşteriler uzun içeriklerle yorulmamalı",
-                    "Hızlı satın alma deneyimindeki sürtünmeler düzenli kontrol edilmeli",
-                ]
-            elif high_rating and not high_engagement and not high_monetary:
-                name = "🙂 Memnun fakat Düşük Bağlılıkta Müşteriler"
-                description = "Memnuniyet olumlu olsa da etkileşim ve harcama seviyesi sınırlı kalan müşterilerdir."
-                recs = [
-                    "Düşük bariyerli tekrar alışveriş teklifleri sunulmalı",
-                    "İlgi kategorilerine göre kısa ve net kampanya mesajları hazırlanmalı",
-                    "Küçük sepetleri büyütecek tamamlayıcı ürünler önerilmeli",
-                ]
-                cautions = [
-                    "Memnuniyet tek başına yüksek gelir potansiyeli anlamına gelmez",
-                    "Kampanya maliyeti müşteri değerine göre sınırlanmalı",
-                ]
-            elif not high_rating and high_engagement and high_monetary:
-                name = "⚠️ Değerli ama Kararsız Müşteriler"
-                description = "Harcama ve etkileşim yüksek, fakat memnuniyet görece düşük olduğu için kayıp riski taşıyan gruptur."
-                recs = [
-                    "Memnuniyetsizlik nedenleri ürün veya deneyim bazında incelenmeli",
-                    "Destek, iade ve teslimat deneyimi iyileştirilmeli",
-                    "Yüksek değerli müşterilere özel telafi teklifleri sunulmalı",
-                ]
-                cautions = [
-                    "Sadece indirim vermek temel memnuniyet problemini çözmeyebilir",
-                    "Negatif deneyim tekrar ederse yüksek değerli müşteri kaybı oluşabilir",
-                ]
-            elif not high_rating and high_engagement and not high_monetary:
-                name = "👀 Araştırma Aşamasındaki Müşteriler"
-                if page_dominant:
-                    name = "👀 Çok Gezen Araştırmacı Müşteriler"
-                elif session_dominant:
-                    name = "⏱️ Uzun Oturumlu Kararsız Müşteriler"
-                description = "Etkileşimi yüksek ancak memnuniyet veya harcama seviyesi sınırlı olan, karar verme süreci uzayan müşterilerdir."
-                recs = [
-                    "Kararsızlığı azaltan ürün karşılaştırmaları gösterilmeli",
-                    "İncelediği kategoriye özel hatırlatma kampanyası yapılmalı",
-                    "Yorumlar, puanlar ve stok bilgisi görünür hale getirilmeli",
-                ]
-                cautions = [
-                    "Uzun oturum her zaman satın alma niyeti anlamına gelmez",
-                    "Navigasyon veya ürün bulma problemleri ayrıca kontrol edilmeli",
-                ]
-            elif not high_rating and not high_engagement and high_monetary:
-                name = "💰 Sessiz Yüksek Harcayanlar"
-                description = "Etkileşim ve memnuniyet sinyali düşük olsa da parasal katkısı yüksek olan müşterilerdir."
-                recs = [
-                    "Satın alma sonrası memnuniyet anketleriyle risk nedenleri ölçülmeli",
-                    "Yüksek harcama kategorilerine özel servis kalitesi artırılmalı",
-                    "Basit ve doğrudan tekrar satın alma teklifleri sunulmalı",
-                ]
-                cautions = [
-                    "Düşük memnuniyet sinyali kayıp riskini artırabilir",
-                    "Bu grupta deneyim problemleri parasal kayba dönüşebilir",
-                ]
-            else:
-                name = "📉 Düşük Etkileşimli Müşteriler"
-                description = "Düşük memnuniyet, kısa oturum veya sınırlı gezinme davranışı gösteren düşük bağlılık grubudur."
-                recs = [
-                    "Basit ve düşük maliyetli yeniden etkileşim kampanyaları uygulanmalı",
-                    "Daha net kategori önerileri ve kısa kampanya mesajları kullanılmalı",
-                    "İlk dönüşümü kolaylaştıracak küçük teşvikler denenmeli",
-                ]
-                cautions = [
-                    "Yüksek pazarlama maliyeti bu grupta geri dönüş sağlamayabilir",
-                    "Düşük etkileşimin veri eksikliğinden kaynaklanmadığı kontrol edilmeli",
-                ]
-
-            recommendations[cluster_id] = {
-                'name': name,
-                'description': description,
-                'recommendations': recs,
-                'cautions': cautions,
-                'rec': '\n\n'.join(f"• {item}" for item in recs),
-                'count': count,
-                'metrics': {
-                    'Average_Rating': rating,
-                    'Average_Session_Duration': session,
-                    'Average_Pages_Viewed': pages,
-                    'Monetary': monetary,
-                },
-            }
-            continue
-
-        r = row['Recency']
-        f = row['Frequency']
-        m = row['Monetary']
-
-        if r < 100 and f > 50:
-            name = "🌟 Sadık Müşteriler (Champions / Loyal Customers)"
-            description = "Yakın zamanda alışveriş yapan, sık işlem gerçekleştiren ve markayla güçlü ilişkisi olan müşteriler."
-            recs = [
-                "VIP müşteri programı oluşturulmalı",
-                "Özel indirim kuponları sunulmalı",
-                "Sadakat programı uygulanmalı",
-                "Premium ürün önerileri yapılmalı",
-            ]
-            cautions = [
-                "Gereksiz indirimlerle marj düşürülmemeli",
-                "Bu müşterilerin memnuniyet ve tekrar alışveriş trendi yakından izlenmeli",
-            ]
-        elif r < 100 and f <= 20:
-            name = "👋 Yeni Müşteriler"
-            description = "Yakın zamanda işlem yapan ancak alışveriş sıklığı henüz düşük olan yeni veya erken dönem müşteriler."
-            recs = [
-                "Hoş geldin kampanyası uygulanmalı",
-                "İkinci alışverişi tetikleyecek teklif sunulmalı",
-                "Marka güveni artırılmalı",
-            ]
-            cautions = [
-                "Bu grubun sadık müşteri olduğu varsayılmamalı",
-                "İlk deneyim sonrası geri dönüş süresi takip edilmeli",
-            ]
-        elif r < 100 and 20 < f <= 50:
-            name = "🎯 Potansiyel Sadık Müşteriler"
-            description = "Güncel ve tekrar eden satın alma davranışı gösteren, sadakat potansiyeli yüksek müşteriler."
-            recs = [
-                "Cross-sell ve up-sell stratejileri uygulanmalı",
-                "Paket kampanyaları sunulmalı",
-                "Sadakat programına dahil edilmeli",
-            ]
-            cautions = [
-                "Teklifler müşterinin alışveriş geçmişiyle uyumlu olmalı",
-                "Fazla geniş kampanyalar segmentin gerçek potansiyelini maskeleyebilir",
-            ]
-        elif 100 <= r < 250 and f > 20:
-            name = "⚠️ Kaybedilme Riski Olanlar (At Risk)"
-            description = "Geçmişte sık alışveriş yapan ancak son dönemde uzaklaşma sinyali veren müşteriler."
-            recs = [
-                "Geri kazanım kampanyası uygulanmalı",
-                "Kişiselleştirilmiş e-posta gönderilmeli",
-                "Özel geri dönüş indirimleri sunulmalı",
-                "SMS ile hatırlatma yapılmalı",
-            ]
-            cautions = [
-                "Teklif zamanlaması doğru yapılmalı; çok geç aksiyon kaybı artırabilir",
-                "İndirim bağımlılığı yaratmamak için kampanya sınırlandırılmalı",
-            ]
-        elif 100 <= r < 300 and f <= 20:
-            name = "💤 Uyuyan Müşteriler"
-            description = "Alışveriş sıklığı ve güncelliği düşük, yeniden aktive edilmesi gereken müşteriler."
-            recs = [
-                "Re-activation kampanyası yapılmalı",
-                "Son şans teklifleri sunulmalı",
-                "Düşük maliyetli hatırlatma iletişimi kullanılmalı",
-            ]
-            cautions = [
-                "Bu gruba yüksek bütçeli kampanya ayırmadan önce dönüş potansiyeli test edilmeli",
-                "İletişim izinleri ve pasiflik süresi kontrol edilmeli",
-            ]
+        if count and score_col in cluster_rows.columns:
+            avg_final_score = float(cluster_rows['Final_Score'].mean())
         else:
-            name = "📉 Düşük Değerli Müşteriler"
-            description = "Güncellik, sıklık veya parasal değer açısından düşük katkı sağlayan müşteri grubu."
-            recs = [
-                "Düşük maliyetli kampanyalar uygulanmalı",
-                "Otomatik pazarlama tercih edilmeli",
-                "Genel kampanyalarla düşük eforlu iletişim kurulmalı",
-            ]
-            cautions = [
-                "Bu segment için müşteri edinme ve pazarlama maliyeti dikkatle sınırlandırılmalı",
-                "Veri kalitesi veya eksik işlem geçmişi yanlış sınıflandırmaya neden olabilir",
-            ]
+            avg_final_score = cluster_score
+
+        description = (
+            f"Bu cluster {dataset_type} centroid değerlerine göre '{segment_name}' davranış tipini gösterir. "
+            f"Centroid tabanlı dinamik skor {cluster_score:.2f}, ortalama fuzzy final skor {avg_final_score:.2f}."
+        )
+        metrics = {
+            feature: float(row[feature])
+            for feature in feature_cols
+            if feature in row.index
+        }
+        if 'Monetary' in row.index and 'Monetary' not in metrics:
+            metrics['Monetary'] = float(row['Monetary'])
 
         recommendations[cluster_id] = {
-            'name': name,
+            'name': segment_name,
+            'segment_name': segment_name,
+            'strategy_title': strategy_title,
             'description': description,
             'recommendations': recs,
-            'cautions': cautions,
+            'cautions': [
+                "Segment kararı sert küme atamasına değil, tüm üyelik değerlerinin ağırlıklı skoruna dayanır.",
+                "K değiştiğinde yalnızca küme sayısı değişir; skor aralıkları ve karar mantığı aynı kalır.",
+            ],
             'rec': '\n\n'.join(f"• {item}" for item in recs),
             'count': count,
-            'metrics': {
-                'Recency': r,
-                'Frequency': f,
-                'Monetary': m,
-            },
-            'avg_r': r,
-            'avg_f': f,
-            'avg_m': m,
+            'metrics': metrics,
+            'cluster_score': cluster_score,
+            'avg_final_score': avg_final_score,
+            'centroid_rank': int(row['Centroid_Rank']) if 'Centroid_Rank' in row.index else 0,
+            'centroid_value': float(row['Centroid_Value']) if 'Centroid_Value' in row.index else 0.0,
         }
 
-    _make_cluster_names_unique(recommendations)
     return recommendations

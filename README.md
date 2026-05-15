@@ -1,12 +1,12 @@
 # 🚀 Akıllı Müşteri Segmentasyonu — RFM & Fuzzy C-Means Dashboard
 
-> Müşteri davranışlarını RFM analizi ve Bulanık K-Means (Fuzzy C-Means) algoritması ile segmentlere ayıran, interaktif bir veri bilimi uygulaması.
+> Müşteri davranışlarını RFM veya PRM modeliyle, Fuzzy C-Means algoritması ve üyelik tabanlı öneri skorlarıyla segmentlere ayıran interaktif veri bilimi uygulaması.
 
 ---
 
 ## 📌 Proje Hakkında
 
-Bu uygulama, e-ticaret ve perakende işletmelerinin müşteri verilerini analiz etmesine olanak tanır. **RFM (Recency, Frequency, Monetary)** metriklerini kullanarak her müşterinin davranışsal profilini çıkarır ve **Fuzzy C-Means** algoritması ile müşterileri anlamlı segmentlere ayırır.
+Bu uygulama, e-ticaret ve dijital ürün ekiplerinin müşteri verilerini analiz etmesine olanak tanır. Veri yapısına göre tek model çalışır: **RFM (Recency, Frequency, Monetary)** veya **PRM (Preference, Response, Monetary)**. İki model aynı analizde karıştırılmaz.
 
 Her segment için otomatik olarak iş önerileri üretilir: sadakat programları, geri kazanım kampanyaları, VIP programları ve daha fazlası.
 
@@ -25,10 +25,11 @@ Klasik K-Means algoritmalarında her müşteri yalnızca tek bir kümeye atanır
 |---|---|
 | 📂 CSV Yükleme | Sütun eşleştirme ile herhangi bir e-ticaret verisi |
 | 📊 RFM Analizi | Recency, Frequency, Monetary otomatik hesaplama |
-| 🤖 Optimal K Seçimi | FPC + PE + XB hibrit skoru ile en iyi küme sayısı |
+| 🤖 Optimal K Seçimi | K=2..6 aralığında FPC + PE + XB hibrit skoru ile en iyi küme sayısı |
+| 🧮 Dinamik Skorlama | Centroid sıralaması ve üyelik matrisi ile RFM_Score/PRM_Score + Final_Score |
 | 🎯 3D Görselleştirme | Interaktif 3D küme dağılım grafiği |
 | 📈 RFM Dağılımları | 2D scatter ve donut grafikleri |
-| 💡 İş Önerileri | Segment bazlı otomatik aksiyon planı |
+| 💡 İş Önerileri | Her kullanıcı için ana öneri etiketi ve 3-4 maddelik aksiyon listesi |
 | 🔎 Müşteri Profili | Bireysel müşteri sorgulama ve son işlem geçmişi |
 | ⬇️ CSV İndirme | Segmentasyon sonuçlarını dışa aktarma |
 
@@ -76,7 +77,9 @@ Tarayıcınızda otomatik olarak `http://localhost:8501` açılacaktır.
 
 ## 📋 Veri Formatı
 
-Uygulama, aşağıdaki sütun yapısına sahip bir CSV dosyası bekler:
+Uygulama RFM veya PRM yapısını otomatik algılar.
+
+### RFM Veri Formatı
 
 | Sütun | Açıklama | Örnek |
 |---|---|---|
@@ -84,6 +87,16 @@ Uygulama, aşağıdaki sütun yapısına sahip bir CSV dosyası bekler:
 | `InvoiceDate` | İşlem tarihi | `2023-01-15` |
 | `Quantity` | Satın alınan ürün miktarı | `3` |
 | `Price` | Birim fiyat | `29.99` |
+
+### PRM Veri Formatı
+
+| Sütun | Açıklama | Örnek |
+|---|---|---|
+| `Customer_ID` | Benzersiz kullanıcı/müşteri kimliği | `12345` |
+| `Product_Category` | Kullanıcının etkileştiği ürün kategorisi | `Electronics` |
+| `Session_Duration_Minutes` | Ortalama veya kayıt bazlı oturum süresi | `8.5` |
+| `Pages_Viewed` | Gezilen sayfa sayısı | `6` |
+| `Total_Amount` | İşlem veya sepet tutarı | `249.90` |
 
 > **Not:** Sütun adları farklıysa endişelenmeyin — uygulama içindeki **Gelişmiş Ayarlar** panelinden sütun eşleştirmesi yapabilirsiniz.
 
@@ -93,12 +106,12 @@ Uygulama, aşağıdaki sütun yapısına sahip bir CSV dosyası bekler:
 
 1. Sol panelden **CSV dosyanızı yükleyin**
 2. Gerekirse **Gelişmiş Ayarlar**'dan sütunları eşleştirin
-3. **Optimal K'yı Otomatik Bul** seçeneğini açık bırakın (önerilir) ya da manuel K girin
+3. **Optimal K'yı Otomatik Bul** seçeneğini açık bırakın (önerilir) ya da manuel K=2..6 arasında seçim yapın
 4. **🚀 Analizi Başlat** butonuna tıklayın
 5. Sonuçları sekmelerde inceleyin:
    - **3D Segmentasyon Grafiği** — Kümelerin uzaysal dağılımı
    - **RFM Dağılımları** — 2D scatter ve pasta grafikleri
-   - **İşletme Önerileri** — Her segment için aksiyon planı
+   - **İşletme Önerileri** — Segment aksiyonları ve kullanıcı bazlı öneri çıktısı
    - **Müşteri Sorgulama** — Bireysel müşteri profili
 6. **Sonuçları CSV Olarak İndir** ile dışa aktarın
 
@@ -138,6 +151,26 @@ Hibrit Skor = (FPC + PE_normalized + XB_normalized) / 3
 - **FPC** (Fuzzy Partition Coefficient): Küme ayrışımının netliği
 - **PE** (Partition Entropy): Belirsizlik ölçümü
 - **XB** (Xie-Beni Index): Kompaktlık / ayrışım oranı
+
+### PRM Dönüşümü
+
+PRM verisi müşteri bazında gruplanır. `Product_Category` için mod alınır, `Session_Duration_Minutes` ve `Pages_Viewed` ortalanır, `Total_Amount` toplanır. Oturum ve sayfa metrikleri MinMax ile normalize edilerek tek `Response` skoru oluşturulur:
+
+```
+Response = (Session_Norm + Pages_Norm) / 2
+```
+
+Modelde kullanılan PRM alanları `Response` ve `Monetary` değerleridir.
+
+### Üyelik Tabanlı Öneri Skoru
+
+Her K için küme centroid değerleri dinamik olarak sıralanır ve skorlar `(rank / K) * 5` formülüyle üretilir. Müşteri final skoru, üyelik değerleri ile küme skorlarının ağırlıklı ortalamasıdır:
+
+```
+FinalScore = Σ (μ_i * Score_i)
+```
+
+RFM modeli çalışıyorsa `RFM_Score`, PRM modeli çalışıyorsa `PRM_Score` üretilir. Çıktı dosyasında müşteri kimliği, üyelik değerleri, model skoru, final skor, segment etiketi ve öneri listesi yer alır.
 
 ---
 

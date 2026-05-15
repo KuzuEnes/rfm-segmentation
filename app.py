@@ -181,6 +181,44 @@ button[data-baseweb="tab"]:hover {
     padding-top: 20px;
 }
 
+/* ── State koruyan sekme kontrolü ── */
+[data-testid="stRadio"] > div {
+    background: rgba(22, 27, 34, 0.6);
+    border-radius: 12px;
+    padding: 6px;
+    border: 1px solid rgba(0, 212, 255, 0.1);
+    gap: 4px;
+}
+[data-testid="stRadio"] label {
+    background: transparent;
+    border-radius: 8px;
+    color: #8B949E !important;
+    font-weight: 500;
+    padding: 8px 14px;
+    transition: all 0.25s ease;
+}
+[data-testid="stRadio"] label:hover {
+    color: #E6EDF3 !important;
+    background: rgba(255,255,255,0.05) !important;
+}
+[data-testid="stRadio"] label:has(input:checked) {
+    background: linear-gradient(135deg,
+        rgba(0, 212, 255, 0.2),
+        rgba(124, 58, 237, 0.2)) !important;
+    color: #00D4FF !important;
+    font-weight: 600;
+    border: 1px solid rgba(0, 212, 255, 0.3) !important;
+}
+[data-testid="stRadio"] input {
+    display: none;
+}
+[data-testid="stRadio"] label > div:first-child {
+    display: none;
+}
+[data-testid="stRadio"] label [data-testid="stMarkdownContainer"] p {
+    margin: 0;
+}
+
 /* ── st.container(border=True) ── */
 [data-testid="stVerticalBlockBorderWrapper"] {
     background: linear-gradient(135deg,
@@ -366,12 +404,11 @@ def get_analysis_labels(dataset_type):
         return {
             'analysis_type': 'PRM',
             'dimensions': {
-                'Average_Rating': 'Preference (Average Rating)',
-                'Average_Session_Duration': 'Response (Session Duration)',
-                'Average_Pages_Viewed': 'Response (Pages Viewed)',
-                'Monetary': 'Monetary',
+                'preference_score': 'P: preference_score',
+                'engagement_score': 'R: engagement_score',
+                'monetary_score': 'M: monetary_score',
             },
-            'axis_order': ['Average_Rating', 'Average_Session_Duration', 'Monetary'],
+            'axis_order': ['preference_score', 'engagement_score', 'monetary_score'],
             'download_name': 'prm_segmentation_results.csv',
         }
 
@@ -390,6 +427,14 @@ def get_analysis_labels(dataset_type):
 def pair_title(labels, first, second):
     return f"{labels['dimensions'][first]} vs {labels['dimensions'][second]}"
 
+
+def axis_pairs(axis_names):
+    return [
+        (axis_names[i], axis_names[j])
+        for i in range(len(axis_names))
+        for j in range(i + 1, len(axis_names))
+    ]
+
 # --------------------------------------------------------------------------- #
 # Session-state başlangıç değerleri                                            #
 # --------------------------------------------------------------------------- #
@@ -401,7 +446,7 @@ if 'results_ready' not in st.session_state:
 # --------------------------------------------------------------------------- #
 st.title("🚀 Akıllı Müşteri Segmentasyonu")
 st.markdown(
-    "RFM Analizi ve Bulanık K-Means (Fuzzy C-Means) algoritması kullanılarak "
+    "RFM ve PRM Analizi ile Bulanık K-Means (Fuzzy C-Means) algoritması kullanılarak "
     "verilerinizin segmentasyonunu gerçekleştirin."
 )
 
@@ -421,6 +466,7 @@ if uploaded_file is not None:
     dataset_info = detect_dataset_structure(df)
     detected_type = dataset_info['type']
     mapping = dataset_info['mapping']
+    prm_mapping = dataset_info.get('prm_mapping', {})
 
     with st.expander("🔍 Veri Seti Özeti ve Önizleme", expanded=False):
         c1, c2, c3 = st.columns(3)
@@ -432,7 +478,7 @@ if uploaded_file is not None:
     with st.sidebar.expander("🛠️ Gelişmiş Ayarlar", expanded=False):
         if detected_type == 'PRM':
             st.markdown("**PRM sütunları otomatik algılandı**")
-            customer_id_col = mapping.get('customer_id_col') or 'Customer_ID'
+            customer_id_col = prm_mapping.get('customer_id_col') or 'Customer_ID'
             invoice_date_col = mapping.get('invoice_date_col')
             quantity_col = mapping.get('quantity_col')
             price_col = mapping.get('price_col')
@@ -449,16 +495,22 @@ if uploaded_file is not None:
         st.divider()
         auto_k = st.checkbox("Optimal K'yı Otomatik Bul", value=True)
         if not auto_k:
-            manual_k = st.slider("Küme Sayısı (K)", min_value=2, max_value=10, value=3)
+            manual_k = st.slider("Küme Sayısı (K)", min_value=2, max_value=6, value=3)
         else:
             manual_k = None
 
     if st.sidebar.button("🚀 Analizi Başlat", use_container_width=True, type="primary"):
         try:
+            if detected_type == 'Bilinmeyen':
+                raise ValueError(
+                    "Veri seti RFM veya PRM için gerekli sütunları içermiyor. "
+                    "RFM için müşteri, tarih, miktar ve fiyat/tutar; PRM için müşteri, "
+                    "ürün kategorisi, oturum süresi, gezilen sayfa ve toplam tutar sütunları gerekir."
+                )
             with st.status("Analiz yürütülüyor...", expanded=True) as status:
                 st.write(f"📦 {detected_type} yapısı algılandı, segmentasyon metrikleri hesaplanıyor...")
                 if detected_type == 'PRM':
-                    segment_data = process_prm_data(df)
+                    segment_data = process_prm_data(df, prm_mapping)
                 else:
                     segment_data = process_data(df, customer_id_col, invoice_date_col,
                                                 quantity_col, price_col,
@@ -478,7 +530,12 @@ if uploaded_file is not None:
                     k = manual_k
 
                 st.write(f"⚙️ Fuzzy C-Means çalıştırılıyor (K={k})...")
-                rfm_results, centers_df, sil_score, fpc = run_fuzzy_cmeans(segment_data, k, feature_cols)
+                rfm_results, centers_df, sil_score, fpc = run_fuzzy_cmeans(
+                    segment_data,
+                    k,
+                    feature_cols,
+                    detected_type
+                )
                 recs = get_cluster_recommendations(rfm_results, centers_df, detected_type)
 
                 st.session_state.update({
@@ -517,59 +574,109 @@ if st.session_state['results_ready']:
     labels = get_analysis_labels(dataset_type)
     analysis_type = labels['analysis_type']
     dimensions = labels['dimensions']
-    x_axis, y_axis, z_axis = labels['axis_order']
+    axis_order = labels['axis_order']
+    x_axis = axis_order[0]
+    y_axis = axis_order[1]
+    z_axis = axis_order[2] if len(axis_order) > 2 else None
+    score_col = 'PRM_Score' if dataset_type == 'PRM' else 'RFM_Score'
+    membership_cols = [col for col in rfm_results.columns if col.startswith('Membership_C')]
+    context_cols = [
+        'Preferred_Category',
+        'Category_Diversity',
+        'Dominant_Category_Ratio',
+        'Monetary_Raw',
+    ] if dataset_type == 'PRM' else []
+    output_cols = (
+        ['CustomerID'] +
+        [col for col in context_cols if col in rfm_results.columns] +
+        feature_cols +
+        ['Cluster'] +
+        membership_cols +
+        ['FinalScore', 'Recommendation_Title', 'Recommendation_List']
+    )
+    output_df = rfm_results[[col for col in output_cols if col in rfm_results.columns]].copy()
+    output_df = output_df.rename(columns={'CustomerID': 'Müşteri_ID'})
+    sampled_output_df = output_df.sample(
+        n=min(50, len(output_df)),
+        random_state=42
+    ) if len(output_df) > 0 else output_df
 
     st.markdown("---")
     st.header(f"📊 {analysis_type} Analiz Sonuçları")
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Toplam Müşteri",     f"{len(rfm_results):,}")
-    m2.metric("Toplam Ciro",        f"₺{rfm_results['Monetary'].sum():,.0f}")
-    m3.metric("Müşteri Ort. Değer", f"₺{rfm_results['Monetary'].mean():,.0f}")
+    monetary_metric_col = 'Monetary_Raw' if dataset_type == 'PRM' and 'Monetary_Raw' in rfm_results.columns else 'Monetary'
+    m2.metric("Toplam Ciro",        f"₺{rfm_results[monetary_metric_col].sum():,.0f}")
+    m3.metric("Müşteri Ort. Değer", f"₺{rfm_results[monetary_metric_col].mean():,.0f}")
     m4.metric("Optimal Küme (K)",   k)
     m5.metric("Model Güveni (FPC)", f"{fpc:.2f}")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🎯 3D Segmentasyon Grafiği",
+    tab_labels = [
+        f"🎯 {'3D' if z_axis else '2D'} Segmentasyon Grafiği",
         f"📈 {analysis_type} Dağılımları",
         "💡 İşletme Önerileri",
         "🔎 Müşteri Sorgulama"
-    ])
+    ]
+    selected_tab = st.radio(
+        "Sonuç görünümü",
+        tab_labels,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="results_active_tab"
+    )
 
     plot_df = rfm_results.copy()
     plot_df['Cluster'] = plot_df['Cluster'].astype(str)
+    chart_cols = [col for col in axis_order if col in plot_df.columns]
 
     COLORS = ['#00D4FF','#7C3AED','#10B981','#F59E0B','#EF4444','#EC4899','#8B5CF6']
 
     # ── TAB 1 ── #
-    with tab1:
-        st.subheader(f"Müşteri Segmentleri — {analysis_type} 3D Dağılım")
-        fig_3d = px.scatter_3d(
-            plot_df, x=x_axis, y=y_axis, z=z_axis,
-            color='Cluster', opacity=0.80,
-            hover_data=['CustomerID'],
-            title=f"{analysis_type} Küme Dağılımı (K={k})",
-            labels=dimensions,
-            color_discrete_sequence=COLORS
-        )
-        fig_3d.update_layout(
-            **PLOTLY_TEMPLATE['layout'],
-            margin=dict(l=0, r=0, b=0, t=40),
-            height=600,
-            scene=dict(
-                bgcolor='rgba(13,17,23,0.9)',
-                xaxis=dict(gridcolor='rgba(0,212,255,0.12)', color='#8B949E'),
-                yaxis=dict(gridcolor='rgba(0,212,255,0.12)', color='#8B949E'),
-                zaxis=dict(gridcolor='rgba(0,212,255,0.12)', color='#8B949E'),
+    if selected_tab == tab_labels[0]:
+        chart_type = "3D" if z_axis else "2D"
+        st.subheader(f"Müşteri Segmentleri — {analysis_type} {chart_type} Dağılım")
+        if z_axis:
+            fig_primary_segment = px.scatter_3d(
+                plot_df, x=x_axis, y=y_axis, z=z_axis,
+                color='Cluster', opacity=0.80,
+                hover_data=['CustomerID'],
+                title=f"{analysis_type} Küme Dağılımı (K={k})",
+                labels=dimensions,
+                color_discrete_sequence=COLORS
             )
-        )
-        st.plotly_chart(fig_3d, use_container_width=True)
+            fig_primary_segment.update_layout(
+                **PLOTLY_TEMPLATE['layout'],
+                margin=dict(l=0, r=0, b=0, t=40),
+                height=600,
+                scene=dict(
+                    bgcolor='rgba(13,17,23,0.9)',
+                    xaxis=dict(gridcolor='rgba(0,212,255,0.12)', color='#8B949E'),
+                    yaxis=dict(gridcolor='rgba(0,212,255,0.12)', color='#8B949E'),
+                    zaxis=dict(gridcolor='rgba(0,212,255,0.12)', color='#8B949E'),
+                )
+            )
+        else:
+            fig_primary_segment = px.scatter(
+                plot_df, x=x_axis, y=y_axis,
+                color='Cluster', opacity=0.85,
+                hover_data=['CustomerID'],
+                title=f"{analysis_type} Küme Dağılımı (K={k})",
+                labels=dimensions,
+                color_discrete_sequence=COLORS
+            )
+            fig_primary_segment.update_layout(
+                **PLOTLY_TEMPLATE['layout'],
+                margin=dict(l=0, r=0, b=0, t=40),
+                height=600,
+            )
+        st.plotly_chart(fig_primary_segment, use_container_width=True)
 
         c_heatmap, c_dist = st.columns(2)
         with c_heatmap:
             st.subheader(f"{analysis_type} Feature Heatmap")
-            heatmap_df = plot_df[feature_cols].corr()
-            heatmap_labels = [dimensions[col] for col in feature_cols]
+            heatmap_df = plot_df[chart_cols].corr()
+            heatmap_labels = [dimensions[col] for col in chart_cols]
             fig_heatmap = px.imshow(
                 heatmap_df,
                 x=heatmap_labels,
@@ -618,6 +725,9 @@ if st.session_state['results_ready']:
         dc = centers_df.copy()
         for col in feature_cols:
             dc[col] = dc[col].round(1)
+        for col in ['Centroid_Value', 'Cluster_Score']:
+            if col in dc.columns:
+                dc[col] = dc[col].round(3)
         cc = plot_df['Cluster'].value_counts().reset_index()
         cc.columns = ['Cluster', 'Müşteri Sayısı']
         cc['Cluster'] = cc['Cluster'].astype(int)
@@ -626,34 +736,33 @@ if st.session_state['results_ready']:
         st.dataframe(dc, use_container_width=True)
 
     # ── TAB 2 ── #
-    with tab2:
-        st.subheader(pair_title(labels, x_axis, y_axis))
-        fig_primary = px.scatter(
-            plot_df, x=x_axis, y=y_axis, color='Cluster',
-            hover_data=['CustomerID', 'Monetary'],
-            labels=dimensions,
-            color_discrete_sequence=COLORS
-        )
-        fig_primary.update_layout(**PLOTLY_TEMPLATE['layout'])
-        st.plotly_chart(fig_primary, use_container_width=True)
+    if selected_tab == tab_labels[1]:
+        comparison_pairs = axis_pairs(chart_cols)
+        for pair_index, (first_axis, second_axis) in enumerate(comparison_pairs):
+            if pair_index == 0:
+                st.subheader(pair_title(labels, first_axis, second_axis))
+                fig_pair = px.scatter(
+                    plot_df, x=first_axis, y=second_axis, color='Cluster',
+                    hover_data=['CustomerID'],
+                    labels=dimensions,
+                    color_discrete_sequence=COLORS
+                )
+                fig_pair.update_layout(**PLOTLY_TEMPLATE['layout'])
+                st.plotly_chart(fig_pair, use_container_width=True)
+                continue
 
-        c1, c2 = st.columns(2)
-        with c1:
-            second_x = feature_cols[2] if dataset_type == 'PRM' else 'Frequency'
-            st.subheader(pair_title(labels, second_x, 'Monetary'))
-            fig_fm = px.scatter(plot_df, x=second_x, y='Monetary', color='Cluster',
-                                labels=dimensions,
-                                color_discrete_sequence=COLORS)
-            fig_fm.update_layout(**PLOTLY_TEMPLATE['layout'])
-            st.plotly_chart(fig_fm, use_container_width=True)
-        with c2:
-            third_x = feature_cols[0]
-            st.subheader(pair_title(labels, third_x, 'Monetary'))
-            fig_rm = px.scatter(plot_df, x=third_x, y='Monetary', color='Cluster',
-                                labels=dimensions,
-                                color_discrete_sequence=COLORS)
-            fig_rm.update_layout(**PLOTLY_TEMPLATE['layout'])
-            st.plotly_chart(fig_rm, use_container_width=True)
+            if pair_index == 1:
+                pair_cols = st.columns(2)
+            with pair_cols[(pair_index - 1) % 2]:
+                st.subheader(pair_title(labels, first_axis, second_axis))
+                fig_pair = px.scatter(
+                    plot_df, x=first_axis, y=second_axis, color='Cluster',
+                    hover_data=['CustomerID'],
+                    labels=dimensions,
+                    color_discrete_sequence=COLORS
+                )
+                fig_pair.update_layout(**PLOTLY_TEMPLATE['layout'])
+                st.plotly_chart(fig_pair, use_container_width=True)
 
         st.subheader("Segment Dağılımı")
         seg_counts = plot_df['Cluster'].value_counts().reset_index()
@@ -667,19 +776,22 @@ if st.session_state['results_ready']:
         st.plotly_chart(fig_pie, use_container_width=True)
 
     # ── TAB 3 ── #
-    with tab3:
+    if selected_tab == tab_labels[2]:
         st.subheader("Segment Bazlı Aksiyon Planı")
         for cluster_id, details in recs.items():
             with st.container(border=True):
                 st.subheader(f"{details['name']} — Küme {cluster_id} ({details['count']} Müşteri)")
-                metric_cols = st.columns(len(feature_cols))
+                metric_cols = st.columns(len(feature_cols) + 2)
                 for metric_col, feature in zip(metric_cols, feature_cols):
                     value = details['metrics'][feature]
                     suffix = "₺" if feature == 'Monetary' else ""
-                    metric_col.metric(f"Ort. {dimensions[feature]}", f"{suffix}{value:,.1f}")
+                    metric_col.metric(f"Ort. {dimensions[feature]}", f"{suffix}{value:,.3f}")
+                metric_cols[-2].metric("Centroid Skoru", f"{details['cluster_score']:.2f}")
+                metric_cols[-1].metric("Ort. Final Skor", f"{details['avg_final_score']:.2f}")
+                st.markdown(f"**Ana Strateji:** {details['strategy_title']}")
                 st.info(f"**Kısa Açıklama:**\n\n{details['description']}")
                 st.success(
-                    "**İşletme Önerileri:**\n\n" +
+                    "**Öneriler:**\n\n" +
                     "\n\n".join(f"• {item}" for item in details['recommendations'])
                 )
                 st.warning(
@@ -688,16 +800,19 @@ if st.session_state['results_ready']:
                 )
 
         st.divider()
+        st.subheader("Öneri Tablosu (Rastgele 50 Müşteri)")
+        st.dataframe(sampled_output_df, use_container_width=True)
+
         st.download_button(
             "⬇️ Sonuçları CSV Olarak İndir",
-            rfm_results.to_csv(index=False).encode('utf-8'),
+            output_df.to_csv(index=False).encode('utf-8'),
             labels['download_name'],
             "text/csv",
             use_container_width=True
         )
 
     # ── TAB 4 ── #
-    with tab4:
+    if selected_tab == tab_labels[3]:
         st.subheader("Bireysel Müşteri Analizi")
         customer_list     = rfm_results['CustomerID'].astype(str).tolist()
         selected_customer = st.selectbox("Müşteri ID Arayın veya Seçin:",
@@ -715,11 +830,17 @@ if st.session_state['results_ready']:
             for metric_col, feature in zip(profile_cols[1:], feature_cols):
                 value = cust_row[feature]
                 suffix = "₺" if feature == 'Monetary' else ""
-                metric_col.metric(dimensions[feature], f"{suffix}{value:,.0f}")
+                metric_col.metric(dimensions[feature], f"{suffix}{value:,.3f}")
+            st.metric(score_col, f"{cust_row[score_col]:.2f}")
+            st.caption(
+                "Üyelik değerleri: " +
+                " · ".join(f"{col}={cust_row[col]:.3f}" for col in membership_cols)
+            )
             st.divider()
+            st.markdown(f"**Ana Strateji:** {cluster_info['strategy_title']}")
             st.info(f"**Kısa Açıklama:**\n\n{cluster_info['description']}")
             st.success(
-                "**Stratejik Aksiyon Planı:**\n\n" +
+                "**Öneriler:**\n\n" +
                 "\n\n".join(f"• {item}" for item in cluster_info['recommendations'])
             )
             st.warning(
